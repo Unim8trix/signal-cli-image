@@ -14,4 +14,4 @@ signal-cli --config "$CONFIG" link -n "$NAME" | while IFS= read -r line; do
     *) printf '%s\n' "$line" ;;
   esac
 done
-echo "[signal-cli] link complete. The daemon starts automatically (entrypoint detects the account)."
+echo "[signal-cli] link complete. Unset SIGNAL_SETUP and restart the container to start the daemon."

@@ -22,8 +22,11 @@ receive Signal messages over `http://127.0.0.1:8080`.
 - `debian:13-slim` + native `signal-cli` (single binary, no JRE) + `qrencode`
 - GPG-verified download of the pinned release
 - Runs as **non-root** (UID/GID `10000`)
-- **Crash-loop-free start:** the entrypoint *waits* until the device is linked,
-  then starts the daemon automatically — no restart needed
+- **Fails loudly:** if the account is not registered/linked, the entrypoint exits
+  with code 1 instead of waiting — an unlinked sidecar shows up as
+  `CrashLoopBackOff` instead of silently looping
+- **Setup mode** (`SIGNAL_SETUP=1`) keeps the container idle without the daemon,
+  for registering or linking via `kubectl exec`
 - In-terminal **QR linking** helper
 
 ## Configuration
@@ -33,6 +36,7 @@ receive Signal messages over `http://127.0.0.1:8080`.
 | `SIGNAL_ACCOUNT`    | *(required)*         | phone number in E.164 format, e.g. `+49151…`     |
 | `SIGNAL_CONFIG`     | `/var/lib/signal-cli`| signal-cli config/account dir — **persist this**     |
 | `SIGNAL_HTTP_BIND`  | `127.0.0.1:8080`     | Daemon HTTP bind. Loopback is right for a sidecar.   |
+| `SIGNAL_SETUP`      | `0`                  | `1` = don't start the daemon, just idle (setup mode) |
 
 Persist `SIGNAL_CONFIG` on a volume — it holds the linked account (keys, session).
 
@@ -64,8 +68,8 @@ docker run -d --name signal-cli \
   ghcr.io/unim8trix/signal-cli
 ```
 
-The default entrypoint waits until the account is linked, then serves the
-JSON-RPC daemon on `SIGNAL_HTTP_BIND`. Point your app at it, e.g.
+The default entrypoint checks that the account is registered/linked (exit 1 if
+not), then serves the JSON-RPC daemon on `SIGNAL_HTTP_BIND`. Point your app at it, e.g.
 `SIGNAL_HTTP_URL=http://127.0.0.1:8080`.
 
 ### As a Kubernetes sidecar
@@ -83,11 +87,20 @@ containers:
       - { name: data, mountPath: /var/lib/signal-cli, subPath: signal-cli }
 ```
 
-Link the device once it's running:
+Without a registered/linked account the sidecar exits. Set `SIGNAL_SETUP=1`,
+then either link it as a secondary device or register it as the primary:
 
 ```sh
 kubectl exec -it deploy/<app> -c signal-cli -- link.sh
+# or, as primary device (captcha from the same public IP as the cluster):
+kubectl exec -it deploy/<app> -c signal-cli -- sh -c 'signal-cli --config "$SIGNAL_CONFIG" -a "$SIGNAL_ACCOUNT" register --captcha <signalcaptcha://...>'
+kubectl exec -it deploy/<app> -c signal-cli -- sh -c 'signal-cli --config "$SIGNAL_CONFIG" -a "$SIGNAL_ACCOUNT" verify <code>'
 ```
+
+Then remove `SIGNAL_SETUP` again.
+
+A readiness probe has to run inside the container (the daemon binds loopback):
+`exec: curl -fsS http://127.0.0.1:8080/api/v1/check`.
 
 ## Image tags & pinning
 
